@@ -83,16 +83,20 @@ describe('二关敌人实战机制', () => {
       setTint: vi.fn(), clearTint: vi.fn(), speak: vi.fn(), phase: 1,
       hp: BOSS.employer.hp * 0.49, hpMax: BOSS.employer.hp, nextLetterAt: 0,
     });
-    boss.doSkill('smoke');
-    expect(boss.scene.ai.bullets.spawn).toHaveBeenCalledTimes(3);
-    expect(boss.scene.ai.bullets.spawn).toHaveBeenCalledWith(expect.objectContaining({ texture: 'bullet_ring', slow: { mult: 0.7, duration: 2 } }));
-    boss.doSkill('stamp');
-    expect(boss.scene.ai.bullets.spawn).toHaveBeenCalledWith(expect.objectContaining({ source: 'shockwave', vx: 150 }));
-    expect(boss.scene.ai.bullets.spawn).toHaveBeenCalledWith(expect.objectContaining({ source: 'shockwave', vx: -150 }));
+    const smoke = boss.planSkill('smoke').flatMap((wave) => wave.shots);
+    expect(smoke).toHaveLength(3);
+    expect(smoke[0]).toMatchObject({ texture: 'bullet_ring', slow: { mult: 0.7, duration: 2 } });
+    const stamp = boss.planSkill('stamp')[0].shots;
+    expect(stamp).toEqual(expect.arrayContaining([
+      expect.objectContaining({ source: 'shockwave', vx: 150 }),
+      expect.objectContaining({ source: 'shockwave', vx: -150 }),
+    ]));
     boss.checkPhase(100);
     expect(boss.phase).toBe(2);
-    boss.phase2Tick(boss.nextBarrageAt);
-    expect(boss.scene.ai.bullets.spawn).toHaveBeenCalledWith(expect.objectContaining({ texture: 'bullet_letter', vy: 100 }));
+    expect(boss.planSkill(boss.cfg.barrageSkill)[0].shots).toEqual([
+      expect.objectContaining({ texture: 'bullet_letter', vy: 100 }),
+      expect.objectContaining({ texture: 'bullet_letter', vy: 100 }),
+    ]);
   });
 
   it('击杀掉落实际授予被动，击杀载荷原有坐标不变', () => {
