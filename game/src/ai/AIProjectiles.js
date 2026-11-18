@@ -1,4 +1,5 @@
 import Phaser from 'phaser';
+import { PROJECTILE_PLACEHOLDERS } from '../config/aiConfig.js';
 
 /**
  * 敌方弹幕对象池（成员D）
@@ -27,6 +28,29 @@ const VISUAL_SCALE = Object.freeze({
   bullet_paper: 1.8,      // 老师二阶段：试卷
   bullet_bubble: 1.7,     // 瞌睡虫泡泡
 });
+
+export function drawBossWarning(scene, shot) {
+  if (shot.aoeRadius) {
+    return scene.add.circle(shot.x, shot.targetY, shot.aoeRadius, 0xff625e, 0.2)
+      .setStrokeStyle(2, 0xff625e, 0.95).setDepth(19);
+  }
+
+  const scale = shot.scale ?? VISUAL_SCALE[shot.texture] ?? 1;
+  const textureSize = PROJECTILE_PLACEHOLDERS[shot.texture];
+  const rotation = Math.atan2(shot.vy, shot.vx);
+  const relative = (shot.angle ?? 0) * Math.PI / 180 - rotation;
+  const alongside = Math.abs(Math.cos(relative));
+  const across = Math.abs(Math.sin(relative));
+  const footprintLength = shot.hitSize ?? (textureSize.w * alongside + textureSize.h * across) * scale;
+  const footprintWidth = shot.hitSize ?? (textureSize.w * across + textureSize.h * alongside) * scale;
+  const length = Math.hypot(shot.vx, shot.vy) * shot.life;
+  return scene.add.rectangle(
+    shot.x + shot.vx * shot.life / 2,
+    shot.y + shot.vy * shot.life / 2,
+    length + footprintLength, footprintWidth, 0xff625e, 0.16,
+  ).setRotation(rotation)
+    .setStrokeStyle(1, 0xff625e, 0.85).setDepth(19);
+}
 
 export class ProjectilePool {
   constructor(scene) {
@@ -66,7 +90,7 @@ export class ProjectilePool {
     // 已上真动画（#93/#94，如粉笔 16×16）path 保持原生尺寸，只放大占位兜底。
     b.setScale(cfg.scale ?? (hasAnim ? 1 : (VISUAL_SCALE[cfg.texture] ?? 1)));
     b.clearTint();
-    b.setAngle(hasAnim ? 0 : (cfg.angle || 0));
+    b.setAngle(cfg.angle || 0);
 
     b.vx = cfg.vx || 0;
     b.vy = cfg.vy || 0;
@@ -78,6 +102,9 @@ export class ProjectilePool {
     b.source = cfg.source || 'projectile';
     b.aoeRadius = cfg.aoeRadius || 0;
     b.targetY = cfg.targetY !== undefined ? cfg.targetY : null;
+    b.hitSize = hasAnim ? cfg.hitSize : null;
+    b.owner = cfg.owner ?? null;
+    b.warning = cfg.warning ?? null;
     b.pierce = cfg.pierce || 0;
     b.hitPlayer = false;
     b.spin = cfg.spin || 0;
@@ -86,6 +113,9 @@ export class ProjectilePool {
 
   release(b) {
     if (!b || !b.scene) return; // 场景已销毁时直接跳过
+    if (b.warning?.scene) b.warning.destroy();
+    b.warning = null;
+    b.owner = null;
     b.setActive(false);
     b.setVisible(false);
     b.clearTint();
@@ -93,6 +123,12 @@ export class ProjectilePool {
 
   ofFaction(faction) {
     return this.pool.filter((b) => b.active && b.faction === faction);
+  }
+
+  releaseOwned(owner) {
+    for (const bullet of this.pool) {
+      if (bullet.active && bullet.owner === owner) this.release(bullet);
+    }
   }
 
   clearAll() {
@@ -117,7 +153,9 @@ export class ProjectilePool {
       if (b.spin) b.angle += b.spin * dt;
 
       // 落地 / 到点爆炸（如词典砸下）
-      if (b.aoeRadius > 0 && b.targetY !== null && b.y >= b.targetY) {
+      const landingAttack = b.aoeRadius > 0 && b.targetY !== null;
+      if (landingAttack && b.y + b.displayHeight / 2 >= b.targetY) {
+        b.y = b.targetY;
         this.explode(b);
         continue;
       }
@@ -132,14 +170,20 @@ export class ProjectilePool {
         continue;
       }
 
-      if (b.faction === 'enemy') this.checkPlayerHit(b, player);
+      if (!landingAttack && b.faction === 'enemy') this.checkPlayerHit(b, player);
     }
   }
 
   /* 敌方弹幕 → 玩家 */
   checkPlayerHit(b, player) {
     if (!player || player.isDead || b.hitPlayer) return;
-    if (!Phaser.Geom.Intersects.RectangleToRectangle(b.getBounds(), player.getBounds())) return;
+    const target = b.owner && player.body
+      ? new Phaser.Geom.Rectangle(player.body.x, player.body.y, player.body.width, player.body.height)
+      : player.getBounds();
+    const hitbox = b.hitSize
+      ? new Phaser.Geom.Rectangle(b.x - b.hitSize / 2, b.y - b.hitSize / 2, b.hitSize, b.hitSize)
+      : b.getBounds();
+    if (!Phaser.Geom.Intersects.RectangleToRectangle(hitbox, target)) return;
     b.hitPlayer = true;
 
     player.takeDamage(b.damage, {
@@ -159,12 +203,15 @@ export class ProjectilePool {
     if (
       player &&
       !player.isDead &&
-      Phaser.Math.Distance.Between(b.x, b.y, player.x, player.y) <= b.aoeRadius
+      Phaser.Geom.Intersects.CircleToRectangle(
+        new Phaser.Geom.Circle(b.x, b.y, b.aoeRadius),
+        player.body ?? player.getBounds(),
+      )
     ) {
       player.takeDamage(b.damage, {
         fromX: b.x,
         knockback: 140,
-        source: 'aoe',
+        source: b.source,
       });
     }
 

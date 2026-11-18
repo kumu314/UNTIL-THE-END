@@ -81,13 +81,13 @@ export class BattleHUD {
   /** 玩家受伤红闪 */
   hurtFlash() { this.flash = 1; }
 
-  /** 计算整数倍点对点缩放与居中偏移（GDD 1.1：像素无模糊拉伸） */
+  /** 跟随主画布 FIT 缩放，文字在 HUD 自己的高分辨率缓冲中直接绘制。 */
   _layout() {
     const cw = this.canvas.width || this.canvas.clientWidth || this.rw;
     const ch = this.canvas.height || this.canvas.clientHeight || this.rh;
-    const scale = Math.max(1, Math.floor(Math.min(cw / this.rw, ch / this.rh)));
-    const ox = Math.floor((cw - this.rw * scale) / 2);
-    const oy = Math.floor((ch - this.rh * scale) / 2);
+    const scale = Math.min(cw / this.rw, ch / this.rh);
+    const ox = (cw - this.rw * scale) / 2;
+    const oy = (ch - this.rh * scale) / 2;
     return { cw, ch, scale, ox, oy };
   }
 
@@ -171,7 +171,7 @@ export class BattleHUD {
     ctx.fillStyle = 'rgba(0,0,0,0.7)';
     ctx.fillRect(x - 2, y - 12, w + 4, 20);
     ctx.fillStyle = '#ffe15b';
-    ctx.font = this._font(8);
+    ctx.font = this._font(9, true);
     ctx.textAlign = 'center';
     ctx.textBaseline = 'top';
     ctx.fillText(this.boss.name, this.rw / 2, y - 9);
@@ -181,12 +181,12 @@ export class BattleHUD {
   _drawStage() {
     if (!this.stage) return;
     const { ctx } = this;
-    ctx.font = this._font(8);
+    ctx.font = this._font(9, true);
     ctx.textAlign = 'left';
     ctx.textBaseline = 'top';
     const w = ctx.measureText(this.stage).width + 8;
     ctx.fillStyle = 'rgba(0,0,0,0.5)';
-    ctx.fillRect(2, 2, w, 10);
+    ctx.fillRect(2, 2, w, 13);
     ctx.fillStyle = '#ffffff';
     ctx.fillText(this.stage, 6, 3);
   }

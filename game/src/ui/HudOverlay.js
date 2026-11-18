@@ -9,10 +9,7 @@ import { BattleHUD } from './BattleHUD.js';
  * 所以整套 HUD 一直是死代码。本模块负责三件事：
  *
  *  1. 建一块全屏覆盖 canvas（pointer-events: none，不拦截鼠标键盘）
- *  2. **后备缓冲固定为逻辑分辨率 480×270**，HUD 内部按 scale=1 绘制，
- *     再由 CSS 把这块缓冲拉伸到与 Phaser 主画布完全重合的矩形上。
- *     这样做是为了避免"HUD 自己算整数倍缩放 + Phaser 自己算 FIT 缩放"
- *     两套几何各算一遍，导致血条相对游戏画面偏移几十像素。
+ *  2. 后备缓冲按屏幕实际像素绘制，布局坐标仍使用 480×270。
  *  3. 跟随窗口缩放 / Phaser ScaleManager 事件重新对齐。
  */
 const CANVAS_ID = 'hud-overlay';
@@ -28,12 +25,9 @@ function ensureCanvas() {
       top: '0px',
       pointerEvents: 'none',
       zIndex: '10',
-      imageRendering: 'pixelated',
     });
     document.body.appendChild(canvas);
   }
-  canvas.width = GAME_WIDTH;
-  canvas.height = GAME_HEIGHT;
   canvas.style.display = 'block';
   return canvas;
 }
@@ -53,6 +47,11 @@ export function mountBattleHud(game) {
     canvas.style.top = `${rect.top}px`;
     canvas.style.width = `${rect.width}px`;
     canvas.style.height = `${rect.height}px`;
+    const ratio = window.devicePixelRatio || 1;
+    const width = Math.max(1, Math.round(rect.width * ratio));
+    const height = Math.max(1, Math.round(rect.height * ratio));
+    if (canvas.width !== width) canvas.width = width;
+    if (canvas.height !== height) canvas.height = height;
   };
 
   sync();
