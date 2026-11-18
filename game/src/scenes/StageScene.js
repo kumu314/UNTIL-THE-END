@@ -9,6 +9,7 @@ import AIManager from '../ai/AIManager.js';
 import XpSystem from '../entities/XpSystem.js';
 import { audio } from '../audio/AudioManager.js';
 import { mountBattleHud } from '../ui/HudOverlay.js';
+import { addSceneText } from '../ui/SceneText.js';
 import { EasterEggModal, EGG_PRESETS } from '../ui/EasterEggModal.js';
 import { TypewriterTransition, TRANSITION_PRESETS } from '../ui/TypewriterTransition.js';
 import { installEndingScreen } from '../ui/EndingScreen.js';
@@ -449,10 +450,11 @@ export default class StageScene extends Phaser.Scene {
       .setDisplaySize(30, 30)
       .setDepth(18);
     this.child.play('boss_child:idle');
-    this.add.text(ELDER_CHILD.x - 96, this._groundTop() - 68,
+    this.hugCaption = addSceneText(this, ELDER_CHILD.x - 30, this._groundTop() - 64,
       '孩子拖着行李箱，准备远行。\n慢慢走到他身后，抱一抱他。', {
-        fontFamily: 'monospace', fontSize: '8px', color: '#ffe6a7', align: 'center',
-      }).setDepth(21);
+        size: 10, color: '#fff1d4', center: true, world: true,
+        width: 145, background: '#201927e8', name: 'hug-hint',
+      });
   }
 
   /** 经验系统接线（issue #17）：光球磁吸 + 升级三选一，跨关 registry 持久化 */
@@ -531,6 +533,8 @@ export default class StageScene extends Phaser.Scene {
     if (this.phaseId !== 'elder' || this.endingPlayed || !this.child) return;
     if (!canHugChild(this.player)) return;
     this.endingPlayed = true;
+    this.hugCaption?.destroy();
+    this.hugCaption = null;
     this.modalOpen = true;
     this.player.setVelocity(0, 0);
     this.player.play('player_elder:idle', true);
@@ -927,18 +931,12 @@ export default class StageScene extends Phaser.Scene {
   }
 
   _buildDemoGuide() {
-    const guide = this.add
-      .text(10, 44, 'A/D 移动   W / Space 跳跃   S 格挡\nJ 近战   L 远程   T 切年龄   R 复活', {
-        fontFamily: 'monospace',
-        fontSize: '8px',
-        color: '#d7f5d8',
-        lineSpacing: 2,
-        backgroundColor: '#000000aa',
-        padding: { x: 4, y: 3 },
-      })
-      .setScrollFactor(0)
-      .setDepth(2000);
-    this.tweens.add({ targets: guide, alpha: 0, duration: 1200, delay: 6000 });
+    const guide = addSceneText(this, 10, 44,
+      'A/D 移动 · W / 空格跳跃 · S 格挡\nJ 近战 · L 远程 · T 切年龄 · R 复活', {
+        size: 10, color: '#efffed', background: '#182022e8', name: 'key-guide',
+      });
+    this.tweens.add({ targets: guide, alpha: 0, duration: 1200, delay: 6000,
+      onComplete: () => guide.destroy() });
   }
 
   /** 老年按 Space：只冒一个咳嗽气泡，绝不产生竖直速度 */
@@ -962,11 +960,9 @@ export default class StageScene extends Phaser.Scene {
   }
 
   _toast(text) {
-    const t = this.add
-      .text(GAME_WIDTH / 2, 36, text, { fontFamily: 'monospace', fontSize: '9px', color: '#fff6c9' })
-      .setOrigin(0.5)
-      .setScrollFactor(0)
-      .setDepth(3000);
+    const t = addSceneText(this, GAME_WIDTH / 2, 36, text, {
+      size: 10, center: true, color: '#fff6c9', background: '#201927e8',
+    });
     this.tweens.add({ targets: t, alpha: 0, duration: 1400, delay: 500, onComplete: () => t.destroy() });
   }
 
