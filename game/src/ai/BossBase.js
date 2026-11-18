@@ -1,6 +1,7 @@
 import Phaser from 'phaser';
 import { BOSS } from '../config/aiConfig.js';
 import { playAnim } from './anim.js';
+import { drawBossWarning } from './AIProjectiles.js';
 
 /**
  * Boss AI 通用框架（成员D · GDD 7.3）
@@ -12,7 +13,7 @@ import { playAnim } from './anim.js';
  *      → RECOVER 后摇
  *
  * HP 低于 phase2At 强制二阶段：缩短冷却 + 常态化弹幕 + enraged 动画。
- * 招式由 BossTeacher / BossAdmin 覆写 telegraphRect / skillAnim / doSkill / phase2Tick。
+ * 招式由子类提供预警和弹道共用的计划，出手时按计划发射。
  *
  * 动画键遵循契约：boss_teacher:sweep / boss_employer:smoke …
  * 贴图 / 图集由成员A 提供；未加载时 AIManager 生成同名占位纹理。
@@ -42,12 +43,12 @@ export class BossBase extends Phaser.Physics.Arcade.Sprite {
     this.actionState = 'WANDER';
     this.actionTimer = cfg.wanderTime;
     this.pendingSkill = null;
+    this.attackWaves = [];
+    this.attackElapsed = 0;
     this.cooldownScale = 1;
     this.nextBarrageAt = Infinity;
     this.letterRainActive = false;
-    this.letterRainEndAt = 0;
     this.hurtUntil = 0;
-    this.animOverrideUntil = 0;
     this._introPlayed = false;
 
     const world = scene.physics.world.bounds;
@@ -60,9 +61,6 @@ export class BossBase extends Phaser.Physics.Arcade.Sprite {
 
     // 脚底对齐地面：兼容占位图（origin 0.5）与 A 图集的 pivot 原点
     this.setY(this.groundY - (this.displayHeight - this.displayOriginY));
-
-    this.telegraphs = [];
-    this.contactCd = 0;
 
     this.setAnim('idle', true);
     scene.events.emit('ai:boss:spawn', {
@@ -79,32 +77,32 @@ export class BossBase extends Phaser.Physics.Arcade.Sprite {
       this.speak(this.cfg.lines?.intro, { shake: true });
     }
     const dt = Math.min(delta, 40) / 1000;
-    if (this.contactCd > 0) this.contactCd -= dt;
-
-    this.setFlipX(this.player.x < this.x);
     this.checkPhase(time);
-    if (this.phase === 2 && this.phase2Tick) this.phase2Tick(time, dt);
 
     switch (this.actionState) {
       case 'WANDER':
+        this.setFlipX(this.player.x < this.x);
         this.wander(dt);
         this.actionTimer -= dt;
-        if (this.actionTimer <= 0) this.beginSelect();
+        if (this.actionTimer <= 0) this.beginSelect(time);
         break;
 
       case 'TELEGRAPH':
         this.body.setVelocityX(0);
         this.actionTimer -= dt;
-        if (this.actionTimer <= 0) this.executeSkill(time);
+        if (this.actionTimer <= 1e-6) this.executeSkill();
+        else this.advanceWaves(-this.actionTimer * 1000);
         break;
 
       case 'ACTION':
         this.body.setVelocityX(0);
-        if (this.skillTick) this.skillTick(time, dt);
+        this.attackElapsed += dt * 1000;
+        this.advanceWaves(this.attackElapsed);
         this.actionTimer -= dt;
         if (this.actionTimer <= 0) {
           this.actionState = 'RECOVER';
           this.actionTimer = this.cfg.recoverTime * this.cooldownScale;
+          this.letterRainActive = false;
           this.clearTelegraphs();
         }
         break;
@@ -120,7 +118,6 @@ export class BossBase extends Phaser.Physics.Arcade.Sprite {
     }
 
     this.refreshAnim();
-    this.touchPlayer();
   }
 
   wander(dt) {
@@ -138,10 +135,6 @@ export class BossBase extends Phaser.Physics.Arcade.Sprite {
 
   /** 当前应播放的动作键；受击时由 hurtUntil 临时接管 */
   currentAction() {
-    // 预警期也播起手动作（issue #95：原先只有伤害期播，0.4s 预警里 Boss 看着像站着发呆）
-    if (this.actionState === 'TELEGRAPH' || this.actionState === 'ACTION') {
-      return this.skillAnim(this.pendingSkill) || 'idle';
-    }
     if (this.phase === 2) return 'enraged';
     return 'idle';
   }
@@ -153,8 +146,9 @@ export class BossBase extends Phaser.Physics.Arcade.Sprite {
   }
 
   refreshAnim() {
+    if (this.actionState === 'TELEGRAPH' || this.actionState === 'ACTION') return;
     const now = this.scene.time.now;
-    if (now < this.hurtUntil || now < this.animOverrideUntil) return;
+    if (now < this.hurtUntil) return;
     this.setAnim(this.currentAction());
   }
 
@@ -164,11 +158,27 @@ export class BossBase extends Phaser.Physics.Arcade.Sprite {
   }
 
   /* ---------- 招式选择 ---------- */
-  beginSelect() {
-    this.pendingSkill = this.pickSkill();
-    this.beginTelegraph(this.pendingSkill);
+  beginSelect(time = this.scene.time.now) {
+    const barrage = this.phase === 2 && time >= this.nextBarrageAt;
+    this.pendingSkill = barrage ? this.cfg.barrageSkill : this.pickSkill();
+    if (barrage) this.nextBarrageAt = time + this.cfg.barrageInterval * 1000;
+    this.setFlipX(this.player.x < this.x);
+    this.body.setVelocityX(0);
+    this.attackWaves = this.planSkill(this.pendingSkill);
+    this.attackElapsed = 0;
     this.actionState = 'TELEGRAPH';
     this.actionTimer = this.cfg.telegraphTime;
+    this.hurtUntil = 0;
+    const animation = this.skillAnim(this.pendingSkill);
+    this.setAnim(animation, true);
+    // 预警保持在起手姿势，由结算时钟切换到图集标记的出手帧。
+    const frames = this.anims?.currentAnim?.frames;
+    const releaseIndex = frames?.findIndex(
+      (frame) => frame.textureFrame === this.cfg.releaseFrames[this.pendingSkill],
+    ) ?? -1;
+    this.releaseFrame = frames?.[releaseIndex];
+    if (this.releaseFrame) this.anims.pause(frames[Math.max(0, releaseIndex - 1)]);
+    this.advanceWaves(-this.cfg.telegraphTime * 1000);
   }
 
   pickSkill() {
@@ -186,33 +196,41 @@ export class BossBase extends Phaser.Physics.Arcade.Sprite {
     return list[0].id;
   }
 
-  beginTelegraph(skillId) {
-    const r = this.telegraphRect(skillId);
-    if (!r) return;
-    const rect = this.scene.add
-      .rectangle(r.x, r.y, r.w, r.h, 0xff3344, 0.18)
-      .setStrokeStyle(2, 0xff3344)
-      .setDepth(4);
-    this.telegraphs.push(rect);
-    this.scene.tweens.add({
-      targets: rect,
-      alpha: 0.7,
-      duration: this.cfg.telegraphTime * 1000,
-      yoyo: true,
-    });
+  advanceWaves(elapsed) {
+    const leadMs = this.cfg.telegraphTime * 1000;
+    for (const wave of this.attackWaves) {
+      if (wave.fired) continue;
+      if (!wave.warnings && elapsed >= wave.at - leadMs - 1e-6) {
+        wave.warnings = wave.warn === false ? [] : wave.shots.map(
+          (shot) => drawBossWarning(this.scene, shot),
+        );
+      }
+      if (elapsed < wave.at - 1e-6 || this.actionState !== 'ACTION') continue;
+      wave.fired = true;
+      wave.shots.forEach((shot, index) => {
+        const warning = wave.warnings[index];
+        const bullet = this.scene.ai.bullets.spawn({
+          ...shot, owner: this, warning: shot.aoeRadius ? warning : null,
+        });
+        if (!shot.aoeRadius || !bullet) warning?.destroy();
+      });
+      wave.warnings = [];
+    }
   }
 
   clearTelegraphs() {
-    this.telegraphs.forEach((t) => t.destroy());
-    this.telegraphs = [];
+    for (const wave of this.attackWaves ?? []) {
+      wave.warnings?.forEach((warning) => warning.destroy());
+    }
+    this.attackWaves = [];
   }
 
-  executeSkill(time) {
-    this.clearTelegraphs();
+  executeSkill() {
     this.actionState = 'ACTION';
-    this.actionTimer =
-      (this.cfg.skillDurations && this.cfg.skillDurations[this.pendingSkill]) || 0.8;
-    this.doSkill(this.pendingSkill, time);
+    this.actionTimer = this.cfg.skillDurations[this.pendingSkill] ?? this.cfg.letterRainDuration;
+    if (this.releaseFrame) this.anims.resume(this.releaseFrame);
+    this.onSkillRelease(this.pendingSkill);
+    this.advanceWaves(0);
   }
 
   /* ---------- 阶段 ---------- */
@@ -226,7 +244,9 @@ export class BossBase extends Phaser.Physics.Arcade.Sprite {
     this.scene.time.delayedCall(260, () => {
       if (this.active && !this.defeated) this.clearTint();
     });
-    this.setAnim('enraged', true);
+    if (this.actionState !== 'TELEGRAPH' && this.actionState !== 'ACTION') {
+      this.setAnim('enraged', true);
+    }
 
     this.scene.events.emit('ai:boss:phase', { kind: this.kind, phase: 2 });
     this.speak(
@@ -241,11 +261,10 @@ export class BossBase extends Phaser.Physics.Arcade.Sprite {
     this.hp -= amount;
 
     this.setTint(0xff7a7a);
-    this.hurtUntil = this.scene.time.now + 150;
-    this.setAnim('hurt', true);
-    this.scene.time.delayedCall(160, () => {
-      if (this.active && !this.defeated) this.refreshAnim();
-    });
+    if (this.actionState !== 'TELEGRAPH' && this.actionState !== 'ACTION') {
+      this.hurtUntil = this.scene.time.now + 150;
+      this.setAnim('hurt', true);
+    }
 
     this.scene.events.emit('ai:damage', {
       x: this.x,
@@ -270,6 +289,7 @@ export class BossBase extends Phaser.Physics.Arcade.Sprite {
     this.defeated = true;
     this.body.enable = false;
     this.clearTelegraphs();
+    this.scene.ai.bullets.releaseOwned(this);
     this.letterRainActive = false;
     this.speak(this.cfg.lines?.defeat, { holdMs: 2400 });
     this._paperBurst();
@@ -340,29 +360,13 @@ export class BossBase extends Phaser.Physics.Arcade.Sprite {
     }
   }
 
-  touchPlayer() {
-    if (!this.player || this.player.isDead) return;
-    if (this.contactCd > 0) return;
-    if (!Phaser.Geom.Intersects.RectangleToRectangle(this.getBounds(), this.player.getBounds())) return;
-    this.contactCd = 0.6;
-    this.player.takeDamage(this.cfg.contactDamage, {
-      fromX: this.x,
-      knockback: 140,
-      source: `boss:${this.kind}`,
-    });
-  }
-
   destroy(fromScene) {
     this.clearTelegraphs();
+    this.scene?.ai?.bullets?.releaseOwned(this);
     super.destroy(fromScene);
   }
 
-  /* 子类覆写 */
-  telegraphRect() {
-    return null;
-  }
-
-  doSkill() {}
+  onSkillRelease() {}
 }
 
 export default BossBase;

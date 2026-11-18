@@ -213,11 +213,11 @@ export const BOSS = Object.freeze({
     wanderTime: 1.2,
     telegraphTime: 0.4,
     recoverTime: 0.6,
-    contactDamage: 10,
     preferredRange: 96,
     phase2At: 0.5,
     phase2CooldownScale: 0.65,
     barrageInterval: 6.5,
+    barrageSkill: 'paper',
     paperFallSpeed: 95,
     groundY: 240,
     skills: [
@@ -225,7 +225,8 @@ export const BOSS = Object.freeze({
       { id: 'snipe', weight: 30, minRange: 36 },
       { id: 'audit', weight: 30 },
     ],
-    skillDurations: { sweep: 1.0, snipe: 0.7, audit: 1.4 },
+    skillDurations: { sweep: 1.0, snipe: 0.7, audit: 1.4, paper: 0.8 },
+    releaseFrames: { sweep: 'sweep_2', snipe: 'throw_chalk_2', audit: 'summon_2', paper: 'enraged_2' },
     damage: { sweep: 18, snipe: 10, audit: 20, paper: 12 },
   },
   employer: {
@@ -242,11 +243,11 @@ export const BOSS = Object.freeze({
     wanderTime: 1.2,
     telegraphTime: 0.4,
     recoverTime: 0.65,
-    contactDamage: 10,
     preferredRange: 105,
     phase2At: 0.5,
     phase2CooldownScale: 0.62,
     barrageInterval: 7,
+    barrageSkill: 'letters',
     letterRainDuration: 4.0,
     groundY: 240,
     skills: [
@@ -254,6 +255,7 @@ export const BOSS = Object.freeze({
       { id: 'stamp', weight: 45 },
     ],
     skillDurations: { smoke: 1.0, stamp: 1.1 },
+    releaseFrames: { smoke: 'smoke_2', stamp: 'slam_2', letters: 'envelopes_2' },
     damage: { smoke: 6, stamp: 20, letter: 12 },
   },
 });
